@@ -19,10 +19,17 @@
 
 ## 📦 安装
 
-在 Yunzai 插件目录执行：
+在 Yunzai 插件目录执行（三个平台的仓库同步更新，**选你能访问的那个**）：
 
 ```bash
+# GitHub
 git clone --depth=1 https://github.com/cchanlan/atme-plugin.git ./plugins/atme-plugin
+
+# Gitee
+git clone --depth=1 https://gitee.com/longhengmu/atme-plugin.git ./plugins/atme-plugin
+
+# GitCode
+git clone --depth=1 https://gitcode.com/ccxhan/atme-plugin.git ./plugins/atme-plugin
 ```
 
 **依赖要求**：Node **22.13+**（用内置 `node:sqlite`，无需编译）。
