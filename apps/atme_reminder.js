@@ -49,23 +49,36 @@ function cfg () {
 }
 
 // ---------- 防重复触发锁 ----------
+// ⚠️ 这里踩过坑：锁的 TTL 一度固定 5 秒，而**出图 + 发图是浮动耗时的**
+//    （渲染一页几百毫秒到几秒，合并转发更慢）。实测出现过：用户连发两条消息，
+//    第一次处理花了 4.4 秒才发完，锁在 5 秒时过期，第二条消息直接闯进来，
+//    于是同一批未读被提醒了两遍、图也发了两张。
+//
+//    所以锁的语义改成「**处理期间一直持有，处理完才释放**」：
+//      · 正常路径 → 函数末尾的 releaseLock 释放
+//      · 异常路径 → finally 里的 releaseLock 释放
+//      · 进程/逻辑卡死 → TTL 兜底（给足余量，宁多锁一会儿也不能重复发）
+//    这个 TTL 只是"防死锁"，不是"防重复"的主力。
 const processingLock = new Map()
-const LOCK_TTL_MS = 5000
+const LOCK_STALE_MS = 120000   // 兜底上限：正常绝不会占用这么久
 
 function isLocked (groupId, userId) {
   const key = `${groupId}:${userId}`
   const at = processingLock.get(key)
   if (at === undefined) return false
-  if (Date.now() - at < LOCK_TTL_MS) return true
+  // 还没到兜底上限 → 认为有人正在处理，跳过这条消息
+  if (Date.now() - at < LOCK_STALE_MS) return true
+  // 理论上不该到这里（正常都会走 releaseLock）；真到了说明上次处理异常中断了
+  logger.warn(`[Atme-Plugin] ${key} 的处理锁超时未释放（${LOCK_STALE_MS}ms），已强制放开`)
   processingLock.delete(key)
   return false
 }
 
 function setLock (groupId, userId) {
   processingLock.set(`${groupId}:${userId}`, Date.now())
-  // 兜底清扫：锁自然过期后把残留键删掉，避免 Map 无限增长
+  // 兜底清扫：把卡死的残留键删掉，避免 Map 无限增长
   if (processingLock.size > 200) {
-    const deadline = Date.now() - LOCK_TTL_MS
+    const deadline = Date.now() - LOCK_STALE_MS
     for (const [k, t] of processingLock) {
       if (t < deadline) processingLock.delete(k)
     }
@@ -366,6 +379,25 @@ export class atmeReminder extends plugin {
         memberCount = gm.size || 0
       } catch { /* 拿不到就不显示人数 */ }
 
+      // ⚠️ 先"占住"这批未读，再出图发送。
+      //
+      // 顺序很重要：出图 + 发图是**浮动耗时**的（几百毫秒到几秒），
+      // 如果在发送成功之后才清未读，这段窗口里用户再发一条消息，
+      // accept() 就会读到同一批未读 → 又提醒一遍（实测踩到：同一条提醒发了两次、图也两张）。
+      //
+      // 现在的策略是"先清后发"：一旦判定该提醒，就立刻把这批未读处理掉
+      // （按配置要么清空、要么标记已提醒），后面出图失败也只是少发一次提醒，
+      // 不会重复打扰。两条消息几乎同时到达时，第二条会看到空未读直接退出。
+      const remindedIds = unread.map(r => r.unique_id)
+      await Store.updateCooldown(groupId, userId)
+      if (c.AUTO_CLEAR_AFTER_SEND) {
+        await Store.clearUnread(groupId, userId)
+      } else {
+        // 保留记录但标记已提醒，否则冷却期一过会重复提醒同一批艾特
+        await Store.markReminded(groupId, userId, remindedIds)
+      }
+      await Store.clearAtTriggerTime(groupId, userId)
+
       const buffs = await renderReminderImage(e, unread, userId, groupName, memberCount)
       if (!buffs.length) return
 
@@ -390,18 +422,6 @@ export class atmeReminder extends plugin {
       }
 
       scheduleRecall(e, [...tipIds, ...sendResult.messageIds], c.AUTO_RECALL_SECONDS)
-
-      // ---- 收尾：进冷却 + 清未读 ----
-      await Store.updateCooldown(groupId, userId)
-
-      if (c.AUTO_CLEAR_AFTER_SEND) {
-        await Store.clearUnread(groupId, userId)
-        await Store.clearAtTriggerTime(groupId, userId)
-      } else {
-        // 保留记录但标记已提醒，否则冷却期一过会重复提醒同一批艾特
-        await Store.markReminded(groupId, userId, unread.map(r => r.unique_id))
-        await Store.clearAtTriggerTime(groupId, userId)
-      }
     } catch (err) {
       logger.error('[Atme-Plugin] 发送提醒失败:', err)
     } finally {
