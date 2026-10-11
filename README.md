@@ -142,6 +142,3 @@ data/atme/
 ## 📄 License
 
 GPL-3.0-or-later —— 可自由使用、修改、分发，衍生作品需以相同协议开源。
-
-本项目的早期版本基于 [anyliew/atme-plugin](https://gitcode.com/anyliew/atme-plugin)（原作者 Anyliew）开发，
-现数据层、消息适配、出图界面等均已重写。
