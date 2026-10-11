@@ -57,16 +57,23 @@ export function cleanMessageSegments (message) {
 
 /**
  * HTML 转义。
- * 同时转义引号：这些内容会被塞进 `src="..."` 这类属性里，只处理 &<>
- * 的话，昵称里一个双引号就能把属性截断。
+ *
+ * 除了常规的 `&<>"'`，还**必须转义 `{`**（转成 `&#123;`）：
+ * 出图有个降级路径会把整页 HTML 交给宿主的渲染服务，而宿主那套会用
+ * **art-template** 再过一遍（`lib/core/render/Renderer.js` 的 `dealTpl`）。
+ * art-template 认 `{{ }}` 和 `<%% %>` 做表达式求值 —— 昵称里只要出现 `{{`，
+ * 轻则渲染报错，重则被当模板执行。`<` 本来就被转掉了，`{` 补上就堵死了。
+ *
+ * `&#123;` 在 HTML 里显示出来就是 `{`，正文和属性值都正常还原，不影响观感。
  */
 export function escapeHtml (str) {
   if (str === null || str === undefined) return ''
-  return String(str).replace(/[&<>"']/g, (m) => {
+  return String(str).replace(/[&<>"'{]/g, (m) => {
     if (m === '&') return '&amp;'
     if (m === '<') return '&lt;'
     if (m === '>') return '&gt;'
     if (m === '"') return '&quot;'
+    if (m === '{') return '&#123;'
     return '&#39;'
   })
 }
@@ -325,7 +332,7 @@ export function buildPageHtml ({
 <html>
 <head><meta charset="utf-8"><style>${PAGE_CSS}${extraCss}</style></head>
 <body>
-<div class="phone">
+<div class="phone" id="container">
   <!-- 状态栏 -->
   <div class="statusbar">
     <span class="sb-left"><span class="sb-time">${escapeHtml(clock)}</span>${sbLeft}</span>
@@ -511,64 +518,139 @@ export async function renderPageBuffers ({
   const buffs = []
 
   for (let p = 0; p < pages.length; p++) {
-    const html = pages[p]
-    let page = null
-    let tempHtmlPath = null
-    let retry = false
-    do {
-      retry = false
-      try {
-        const browser = await pup.ensureBrowser()
-        if (!browser) throw new Error('[Atme-Plugin] 浏览器不可用（初始化失败），无法出图')
-        page = await browser.newPage()
-        await page.setViewport({ width: viewportWidth, height: 800, deviceScaleFactor })
-
-        const tempDirHtml = resolve(process.cwd(), 'temp', 'puppeteer')
-        await fs.mkdir(tempDirHtml, { recursive: true })
-        tempHtmlPath = resolve(tempDirHtml, `${tempPrefix}_${Date.now()}_${Math.random().toString(36).slice(2)}.html`)
-        await fs.writeFile(tempHtmlPath, html, 'utf-8')
-
-        await page.goto(`file:///${tempHtmlPath.replace(/\\/g, '/')}`, { waitUntil: 'networkidle0', timeout: 15000 })
-        await waitImages(page)
-        await page.evaluateHandle('document.fonts.ready')
-        await new Promise(r => setTimeout(r, 250))
-
-        const bodyHeight = await page.evaluate(() => document.body.scrollHeight)
-        await page.setViewport({ width: viewportWidth, height: bodyHeight + 40, deviceScaleFactor })
-        const element = await page.$(screenshotSelector)
-        if (!element) throw new Error(`[Atme-Plugin] 找不到截图目标 ${screenshotSelector}`)
-        // png 不接受 quality 参数（puppeteer 会直接抛错）；jpeg 和 webp 都认，
-        // 与宿主的 renderers/puppeteer 行为保持一致。
-        const shotOpts = imgType === 'png' ? { type: 'png' } : { type: imgType, quality }
-        buffs.push(await element.screenshot(shotOpts))
-      } catch (err) {
-        // 宿主浏览器重启期间会拿到 "Connection closed"，重连一次再试
-        if (err.message?.includes('Connection closed') && !retry) {
-          logger.warn('[Atme-Plugin] 浏览器连接断开，尝试重新初始化并重试...')
-          await pup.browserInit()
-          retry = true
-          continue
-        }
-        logger.error('[Atme-Plugin] 渲染失败', err)
-        throw err
-      } finally {
-        if (tempHtmlPath) {
-          try { await fs.unlink(tempHtmlPath) } catch (err) {
-            logger.debug(`[Atme-Plugin] 清理临时HTML失败: ${err.message}`)
-          }
-        }
-        if (page) {
-          try { await page.close() } catch (err) {
-            logger.debug(`[Atme-Plugin] 关闭页面失败: ${err.message}`)
-          }
-        }
-        // 与 ensureBrowser() 配对：出图结束，宿主/自启动实例按空闲策略回收
-        pup.releaseBrowser()
-      }
-    } while (retry)
+    buffs.push(await renderOnePage(pages[p], {
+      tempPrefix, viewportWidth, deviceScaleFactor, screenshotSelector, imgType, quality
+    }))
   }
 
   return buffs
+}
+
+/**
+ * 渲染一页。两级策略：
+ *   ① 自己的管线（借宿主的浏览器 / 自启动兜底）—— 能等图、能控视口，效果最好
+ *   ② 宿主的**通用渲染服务**（`renderService.render`）—— **后端无关**，
+ *      用户配了外置渲染（远程 chromium / browserless / 非 puppeteer 后端）时只有这条走得通
+ *
+ * ⚠️ ② 是必须的：用户的渲染后端不是 puppeteer 时，宿主的 `browserInit`/`browser`
+ *    都不存在，① 一定拿不到浏览器；而自己 launch 在只装了 `puppeteer-core` 的机器上
+ *    也必然失败（`puppeteer-core` 从不自带浏览器，报 `Could not find Chrome`）。
+ *    实测就是这种现场：macOS + TRSS + 外置渲染，插件直接抛栈。
+ */
+async function renderOnePage (html, opts) {
+  try {
+    return await renderWithOwnPipeline(html, opts)
+  } catch (err) {
+    logger.warn(`[Atme-Plugin] 本地出图不可用（${err.message}），改用宿主渲染服务`)
+  }
+
+  const viaHost = await renderViaHostService(html, opts)
+  if (viaHost) return viaHost
+
+  throw new Error(
+    '本地出图和宿主渲染服务都用不了。' +
+    '请检查 Yunzai 的渲染配置（锅巴 → 渲染设置），' +
+    '或按需安装浏览器：npx puppeteer browsers install chrome'
+  )
+}
+
+/** ① 自己的管线：借宿主浏览器（优先）或自启动，然后按选择器截图 */
+async function renderWithOwnPipeline (html, { tempPrefix, viewportWidth, deviceScaleFactor, screenshotSelector, imgType, quality }) {
+  let page = null
+  let tempHtmlPath = null
+  let retry = false
+  do {
+    retry = false
+    try {
+      const browser = await pup.ensureBrowser()
+      if (!browser) throw new Error('拿不到浏览器实例')
+      page = await browser.newPage()
+      await page.setViewport({ width: viewportWidth, height: 800, deviceScaleFactor })
+
+      const tempDirHtml = resolve(process.cwd(), 'temp', 'puppeteer')
+      await fs.mkdir(tempDirHtml, { recursive: true })
+      tempHtmlPath = resolve(tempDirHtml, `${tempPrefix}_${Date.now()}_${Math.random().toString(36).slice(2)}.html`)
+      await fs.writeFile(tempHtmlPath, html, 'utf-8')
+
+      await page.goto(`file:///${tempHtmlPath.replace(/\\/g, '/')}`, { waitUntil: 'networkidle0', timeout: 15000 })
+      await waitImages(page)
+      await page.evaluateHandle('document.fonts.ready')
+      await new Promise(r => setTimeout(r, 250))
+
+      const bodyHeight = await page.evaluate(() => document.body.scrollHeight)
+      await page.setViewport({ width: viewportWidth, height: bodyHeight + 40, deviceScaleFactor })
+      const element = await page.$(screenshotSelector)
+      if (!element) throw new Error(`找不到截图目标 ${screenshotSelector}`)
+      // png 不接受 quality 参数（puppeteer 会直接抛错）；jpeg 和 webp 都认，
+      // 与宿主的 renderers/puppeteer 行为保持一致。
+      const shotOpts = imgType === 'png' ? { type: 'png' } : { type: imgType, quality }
+      return await element.screenshot(shotOpts)
+    } catch (err) {
+      // 宿主浏览器重启期间会拿到 "Connection closed"，重连一次再试
+      if (err.message?.includes('Connection closed') && !retry) {
+        logger.warn('[Atme-Plugin] 浏览器连接断开，尝试重新初始化并重试...')
+        await pup.browserInit()
+        retry = true
+        continue
+      }
+      throw err
+    } finally {
+      if (tempHtmlPath) {
+        try { await fs.unlink(tempHtmlPath) } catch (err) {
+          logger.debug(`[Atme-Plugin] 清理临时HTML失败: ${err.message}`)
+        }
+      }
+      if (page) {
+        try { await page.close() } catch (err) {
+          logger.debug(`[Atme-Plugin] 关闭页面失败: ${err.message}`)
+        }
+      }
+      // 与 ensureBrowser() 配对：出图结束，宿主/自启动实例按空闲策略回收
+      pup.releaseBrowser()
+    }
+  } while (retry)
+}
+
+/**
+ * ② 交给宿主的通用渲染服务。
+ *
+ * 宿主那套的做法和我们的管线其实一致（`#container` 或 `body` 元素截图，
+ * 见 renderers/puppeteer），所以页面里把手机容器同时挂了 `id="container"`，
+ * 两边截的是同一个元素，版式不会变。
+ *
+ * 注意：宿主会把模板文件用 art-template 再过一遍，所以 escapeHtml 里
+ * 连 `{` 一起转掉了（见该函数注释）。
+ */
+async function renderViaHostService (html, { tempPrefix, imgType, quality }) {
+  const svc = pup.hostRenderService
+  if (!svc) return null
+
+  const tplDir = resolve(process.cwd(), 'temp', 'atme-tpl')
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const tplFile = resolve(tplDir, `${tempPrefix}_${stamp}.html`)
+  try {
+    await fs.mkdir(tplDir, { recursive: true })
+    await fs.writeFile(tplFile, html, 'utf-8')
+
+    // 用 render 而不是 screenshot：render 直接把后端的原始产物（Buffer）返回，
+    // 不会包成 segment。
+    const res = await svc.render('atme-plugin', {
+      tplFile,
+      saveId: `atme_${stamp}`,
+      imgType,
+      quality
+    })
+    if (Buffer.isBuffer(res)) return res
+    if (Buffer.isBuffer(res?.file)) return res.file
+    if (Buffer.isBuffer(res?.data)) return res.data
+    logger.warn('[Atme-Plugin] 宿主渲染服务返回了非图片结果')
+    return null
+  } catch (err) {
+    logger.warn(`[Atme-Plugin] 宿主渲染服务出图失败：${err.message}`)
+    return null
+  } finally {
+    try { await fs.unlink(tplFile) } catch { /* 已经没了 */ }
+  }
 }
 
 /**
