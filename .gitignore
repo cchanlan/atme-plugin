@@ -1,0 +1,9 @@
+data/*
+
+.node_modules
+node_modules
+pnpm-lock.yaml
+README.assets/
+README.assets
+# Git Bash 下 `cmd > nul` 误生成的垃圾文件（Windows 保留设备名，无法用常规方式删除）
+nul
