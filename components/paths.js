@@ -30,8 +30,24 @@ export const dataDir = resolve(process.cwd(), 'data', 'atme')
 /** 图片缓存目录 */
 export const imagesDir = resolve(dataDir, 'images')
 
-/** 临时文件目录（发送用临时图、清理目标） */
+/** 临时文件目录（插件自己收发用的临时文件） */
 export const tempDir = resolve(dataDir, 'temp')
+
+/**
+ * 出图发送用的临时目录 —— 故意放在**宿主的 temp 下**、带插件名前缀。
+ *
+ * 为什么不像其它目录那样放 data/atme 下：
+ *   出图结果要给宿主的 `e.reply()` 发送。宿主拿到 Buffer 时（见 lib/core/util.js
+ *   的 util.Buffer），只要 buffer 超过 size 限制（OneBotv11 适配器传的是 size:0，
+ *   即任何非空 buffer 都超限）就会把它**落盘到 `temp/<随机ID>` 并挂 60 秒删除定时器**。
+ *   那个定时器活在进程内存里 —— 出图后 60 秒内重启一次就永远丢，文件永久残留
+ *   （实测攒过 34 个 / 318MB）。
+ *
+ *   所以我们改成**自己落盘、把 file:// 路径交给宿主**：宿主拿到已存在的 file://
+ *   会直接返回、不再写它自己的 temp。放这个位置的用意是让它和宿主其它临时文件
+ *   待在一起（都在 temp 下），但**有独立的目录名**，一眼能看出归属、清理也精准。
+ */
+export const sendTempDir = resolve(process.cwd(), 'temp', 'atme')
 
 /** 帮助图缓存目录 */
 export const helpCacheDir = resolve(dataDir, 'help')
@@ -48,6 +64,7 @@ export default {
   dataDir,
   imagesDir,
   tempDir,
+  sendTempDir,
   helpCacheDir,
   uiIconDir
 }

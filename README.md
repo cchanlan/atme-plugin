@@ -116,15 +116,16 @@ cd plugins/atme-plugin && pnpm add better-sqlite3
 
 ## 🗄️ 数据存放
 
-全部数据在 `data/atme/`：
+数据在 `data/atme/`，发送用的临时图在宿主的 `temp/atme/`：
 
 ```
 data/atme/
 ├── atme.db          # SQLite（记录 / 开关 / 未读 / 全体艾特 / 冷却）
 ├── atme.db-wal      # WAL 日志（正常现象）
 ├── images/          # 艾特消息的图片（webp）
-├── help/            # 帮助图缓存
-└── temp/            # 发送用临时文件，1 小时后自动清理
+└── help/            # 帮助图缓存
+
+temp/atme/           # 出图发送用的临时文件，发完 2 分钟自动删
 ```
 
 数据库表：`records`（记录）/ `unread`（未读）/ `trigger`（被艾特时间）/ `cooldown`（提醒冷却）/
