@@ -367,6 +367,24 @@ const schemas = [
   },
   {
     component: 'Divider',
+    label: '出图'
+  },
+  {
+    field: 'atme.imgType',
+    label: '输出图片类型',
+    helpMessage: '插件所有出图都用这个格式',
+    bottomHelpMessage: '⚠️ 微信不认 webp，会变成文件发出去。',
+    component: 'Select',
+    componentProps: {
+      options: [
+        { label: 'PNG（默认，最清晰，体积最大）', value: 'png' },
+        { label: 'JPEG（体积小，小字略糊）', value: 'jpeg' },
+        { label: 'WebP（体积最小，微信下会变成文件）', value: 'webp' }
+      ]
+    }
+  },
+  {
+    component: 'Divider',
     label: '出图浏览器'
   },
   {

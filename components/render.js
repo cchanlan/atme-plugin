@@ -21,6 +21,7 @@ import { statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import pup from '../lib/puppeteer_local.js'
 import { resourcesDir, uiIconDir } from './paths.js'
+import { getImgType } from './imageType.js'
 
 const iconDir = resolve(resourcesDir, 'icon')
 
@@ -536,8 +537,9 @@ export async function renderPageBuffers ({
         await page.setViewport({ width: viewportWidth, height: bodyHeight + 40, deviceScaleFactor })
         const element = await page.$(screenshotSelector)
         if (!element) throw new Error(`[Atme-Plugin] 找不到截图目标 ${screenshotSelector}`)
-        // png 不接受 quality 参数（puppeteer 会直接抛错）
-        const shotOpts = imgType === 'jpeg' ? { type: 'jpeg', quality } : { type: imgType }
+        // png 不接受 quality 参数（puppeteer 会直接抛错）；jpeg 和 webp 都认，
+        // 与宿主的 renderers/puppeteer 行为保持一致。
+        const shotOpts = imgType === 'png' ? { type: 'png' } : { type: imgType, quality }
         buffs.push(await element.screenshot(shotOpts))
       } catch (err) {
         // 宿主浏览器重启期间会拿到 "Connection closed"，重连一次再试
@@ -606,7 +608,7 @@ export async function renderMessages ({
     timeStr: formatClock()
   }))
 
-  return renderPageBuffers({ pages, tempPrefix, imgType: 'png' })
+  return renderPageBuffers({ pages, tempPrefix, imgType: getImgType() })
 }
 
 export default {

@@ -7,6 +7,7 @@ import * as Render from '../components/render.js'
 import { getSegmentFactory, imageMessage } from '../lib/messageAdapter.js'
 import { applyGroupGate } from '../lib/pluginKit.js'
 import { resourcesDir, helpCacheDir } from '../components/paths.js'
+import { getImgType } from '../components/imageType.js'
 
 const require = createRequire(import.meta.url)
 
@@ -104,7 +105,7 @@ async function renderHelpImage () {
     viewportWidth: 760,
     deviceScaleFactor: 2,
     screenshotSelector: '#container',
-    imgType: 'png'
+    imgType: getImgType()
   })
 
   if (!buffs || buffs.length === 0) throw new Error('渲染返回空结果')
@@ -118,8 +119,13 @@ async function renderHelpImage () {
  * 内容一变文件名就变，旧缓存自然不再命中；顺带把旧文件清掉。
  */
 function getCacheFile () {
-  const hash = crypto.createHash('md5').update(HELP_VERSION + JSON.stringify(modules)).digest('hex').slice(0, 8)
-  return path.join(CACHE_DIR, `help_${HELP_VERSION}_${hash}.png`)
+  const imgType = getImgType()
+  // 哈希里带上出图格式：改了格式必须重建缓存，否则拿到的还是旧格式的图
+  const hash = crypto.createHash('md5')
+    .update(HELP_VERSION + imgType + JSON.stringify(modules))
+    .digest('hex').slice(0, 8)
+  // 后缀跟着格式走（宿主发送时按文件头识别，但文件名与实际格式一致更清楚）
+  return path.join(CACHE_DIR, `help_${HELP_VERSION}_${imgType}_${hash}.${imgType}`)
 }
 
 /**
@@ -129,7 +135,7 @@ function getCacheFile () {
  * （曾出现过 `help.png` 和 `help_v6_xxx.png` 两个旧缓存一直清不掉的情况）。
  * 只要文件名以 help 开头、以 .png 结尾，都算本插件的东西。
  */
-const isCacheFile = (f) => /^help.*\.png$/i.test(f)
+const isCacheFile = (f) => /^help.*\.(png|jpe?g|webp)$/i.test(f)
 
 async function cleanStaleCache () {
   const keep = path.basename(getCacheFile())
@@ -144,16 +150,27 @@ async function cleanStaleCache () {
 async function isCacheValid () {
   try {
     await fs.access(getCacheFile())
-    cleanStaleCache()
     return true
   } catch {
     return false
   }
 }
 
+/**
+ * 拿帮助图。命中缓存直接用；没命中就现出图。
+ *
+ * ⚠️ 两条路径都要清旧缓存：改了出图格式后，新格式的缓存文件**不存在**，
+ *    走的是"现出图"这条 —— 早先只有命中缓存时才清，结果旧格式的缓存
+ *    一直留在目录里没人管（实测切换格式后 png 和 jpeg 两份并存）。
+ */
 async function generateIfNeeded () {
-  if (await isCacheValid()) return getCacheFile()
-  return await renderHelpImage()
+  if (await isCacheValid()) {
+    cleanStaleCache()
+    return getCacheFile()
+  }
+  const file = await renderHelpImage()
+  await cleanStaleCache()   // 刚生成新格式，顺手把别的格式/版本的清掉
+  return file
 }
 
 async function refreshHelp () {

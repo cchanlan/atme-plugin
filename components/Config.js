@@ -145,21 +145,36 @@ class Config {
         const defDoc = YAML.parseDocument(defData);
         let isUpdate = false;
 
-        const merge = (user, def) => {
-            if (!user?.items || !def?.items) return;
-            const existingKeys = new Map();
-            for (const item of user.items) {
-                if (item?.key?.value !== undefined) existingKeys.set(item.key.value, item.value);
-            }
-            for (const item of def.items) {
+        /**
+         * 把默认配置里新增的键合并进用户配置。
+         *
+         * ⚠️ YAML 有两种容器，加项的方式不同：
+         *   - 顶层和嵌套的都是 **YAMLMap**（{a: 1}），要 `map.set(key, value)`；
+         *     它虽然也有 `.items`（键值对数组）但**没有 `.push()`**
+         *     —— 早先直接对 `.items` 调 push，会抛 "user.push is not a function"，
+         *     结果整个合并静默失效，用户升级后拿不到新配置项。
+         *   - 只有**数组值**才是 YAMLSeq，才有 push。
+         * 这里统一走 map.set，跟容器类型无关。
+         */
+        const merge = (userNode, defNode) => {
+            if (!YAML.isMap(userNode) || !YAML.isMap(defNode)) return;
+            for (const item of defNode.items) {
+                const key = item?.key?.value;
+                if (key === undefined) continue;
                 if (item?.key?.commentBefore?.includes?.("noMerge")) continue;
-                if (!existingKeys.has(item.key.value)) {
-                    logger.info(`${Log_Prefix}[合并配置][${name}][${item.key.value}]`);
-                    user.push(item);
+
+                const existing = userNode.get(key, true);   // keepScalar=true 拿原节点
+                const exists = existing !== undefined;
+                if (!exists) {
+                    logger.info(`${Log_Prefix}[合并配置][${name}][${key}]`);
+                    // 补进用户配置；map.set 会按默认文件的顺序排好
+                    userNode.set(key, item.value);
                     isUpdate = true;
-                } else if (YAML.isMap(item.value) && YAML.isMap(existingKeys.get(item.key.value))) {
-                    merge(existingKeys.get(item.key.value), item.value);
+                } else if (YAML.isMap(existing) && YAML.isMap(item.value)) {
+                    // 两边都是子对象 → 递归补它下面缺的键
+                    merge(existing, item.value);
                 }
+                // 其余情况（用户已改过这个键）一律不动 —— 不能覆盖用户的值
             }
         };
         merge(userDoc.contents, defDoc.contents);

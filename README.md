@@ -51,6 +51,7 @@ cd plugins/atme-plugin && pnpm add better-sqlite3
 | `reminder.*` | — | 提醒参数：静默期、冷却期、自动撤回等 |
 | `reminderContext.*` | `true / 1 / 1` | 提醒截图上下文的**新群默认模板**（群内设置过即以群内为准） |
 | `autoMergeCfg` | `true` | 插件更新时自动把新增配置项合并进用户配置 |
+| `imgType` | `png` | 出图格式：`png`（最清晰）/ `jpeg`（体积小）/ `webp`（最小但微信会变文件）|
 | `browser.idleCloseSeconds` | `60` | 仅插件自开浏览器时生效的空闲关闭秒数 |
 
 > 提醒**默认开启**，无需任何设置。群友发 `#关闭我的艾特提醒` 可单独关闭自己；
