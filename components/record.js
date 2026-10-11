@@ -32,7 +32,7 @@ import {
 // 统一从 components/paths.js 取 —— 那里是全插件唯一的路径定义处，
 // 数据目录、图片目录、临时目录、配置目录都只有一份，避免各文件各算一套。
 
-import { dataDir, imagesDir, tempDir, sendTempDir, configDir, defaultConfigDir, userConfigPath } from './paths.js'
+import { dataDir, imagesDir, tempDir, configDir, defaultConfigDir, userConfigPath } from './paths.js'
 export { dataDir, imagesDir }
 
 await fs.mkdir(dataDir, { recursive: true })
@@ -212,36 +212,37 @@ async function sweepOrphans () {
 }
 
 /**
- * 清理 `temp/atme/` 里遗留的发送临时文件。
+ * 清理宿主 `temp/` 里遗留的过期图片。
  *
- * ## 背景（为什么现在能这么干净地清）
+ * ## 为什么需要
  *
- * 早先出图是直接把 Buffer 交给宿主的 `e.reply()`。宿主 `util.Buffer()` 发现
- * buffer 超过 size 限制（OneBotv11 适配器传 `size: 0`，任何非空 buffer 都超限）时，
- * 会把它落盘成 `temp/<ulid>` 并挂 **60 秒后删除**的定时器 —— 而那个定时器活在
- * 进程内存里，**60 秒内重启就永久丢**，文件永久残留（实测攒了 34 个 / 318MB）。
+ * 出图结果以 Buffer 交给宿主的 `e.reply()`（这是最通用的做法，见 forward.js 的说明），
+ * 宿主 `util.Buffer()` 在 buffer 超过 size 限制时会把它落盘成 `temp/<ulid>`，
+ * 并挂一个 **60 秒后删除**的定时器。
  *
- * 现在发送层（components/forward.js）**自己把图写到 `temp/atme/`**、只把
- * `file://` 路径交给宿主，宿主不再往它自己的 temp 丢东西。于是：
- *   · 这个目录**只属于本插件**，不用再猜哪些文件是自己的
- *   · 正常路径由 forward.js 发送后延时 2 分钟自动删（那时图已上传完）
- *   · 这里做兜底：把超过 1 小时还留着的清掉（正常绝不会留这么久）
- *   · 顺带清掉历史上宿主遗留的那批无后缀文件（认 ulid + 超过 24 小时）
+ * ⚠️ 那个定时器活在进程内存里 —— **出图后 60 秒内重启一次就永远丢**，文件永久残留。
+ *    （JiuLi 的 OneBotv11 传 `size: 0`，任何图都会落盘；TRSS 传 10MB，正常图走 base64
+ *      不落盘，所以这个坑只在部分框架上明显。）
+ *
+ * ## 为什么判据是「ulid 文件名 + 超过 24 小时」
+ *
+ * `temp/` 是**宿主与所有插件共用**的目录，混着别人的出图。单看文件名或图片尺寸
+ * 都分不清归属，按那些判据删有误删风险。时间判据最安全：宿主本该 60 秒就删，
+ * 超过 24 小时（它的 1440 倍）还留着的，只可能是重启漏下来的死文件。
  */
-const STALE_SEND_MS = 3600 * 1000            // temp/atme 自己的文件：1 小时
-const LEGACY_HOST_TEMP_MS = 24 * 3600 * 1000 // 宿主 temp 遗留：24 小时（保守）
+const LEGACY_HOST_TEMP_MS = 24 * 3600 * 1000
 
-/** 清理我们自己的发送目录 + 宿主历史遗留 */
+/** 清理宿主 temp 下遗留的过期图片 */
 async function cleanHostTempFiles () {
   let count = 0
   let bytes = 0
 
-  // ① 我们自己的发送目录
   try {
-    const files = await fs.readdir(sendTempDir)
-    const deadline = Date.now() - STALE_SEND_MS
-    for (const name of files) {
-      const abs = resolve(sendTempDir, name)
+    const hostTempDir = resolve(process.cwd(), 'temp')
+    const deadline = Date.now() - LEGACY_HOST_TEMP_MS
+    for (const name of await fs.readdir(hostTempDir)) {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(name)) continue
+      const abs = resolve(hostTempDir, name)
       try {
         const stat = await fs.stat(abs)
         if (!stat.isFile()) continue
@@ -250,30 +251,7 @@ async function cleanHostTempFiles () {
         count++
         bytes += stat.size || 0
       } catch (err) {
-        logger.debug(`[Atme-Plugin] 清理发送临时文件失败 ${name}: ${err.message}`)
-      }
-    }
-  } catch { /* 目录不存在 = 没东西可清 */ }
-
-  // ② 宿主 temp 下历史遗留的（旧版本把 Buffer 交给宿主时留下的）。
-  //    只认「无后缀 ulid 文件名 + 超过 24 小时」—— 那种文件绝不可能是刚生成的。
-  try {
-    const hostTempDir = resolve(process.cwd(), 'temp')
-    if (hostTempDir !== sendTempDir) {
-      const deadline = Date.now() - LEGACY_HOST_TEMP_MS
-      for (const name of await fs.readdir(hostTempDir)) {
-        if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(name)) continue
-        const abs = resolve(hostTempDir, name)
-        try {
-          const stat = await fs.stat(abs)
-          if (!stat.isFile()) continue
-          if (stat.mtimeMs > deadline) continue
-          await fs.unlink(abs)
-          count++
-          bytes += stat.size || 0
-        } catch (err) {
-          logger.debug(`[Atme-Plugin] 清理宿主遗留文件失败 ${name}: ${err.message}`)
-        }
+        logger.debug(`[Atme-Plugin] 清理宿主遗留文件失败 ${name}: ${err.message}`)
       }
     }
   } catch { /* 没有这个目录就算了 */ }
@@ -467,22 +445,18 @@ async function cleanTempFiles () {
   const oneHourAgo = Date.now() - 3600000
   let cleaned = 0
 
-  // 两个目录都要扫：sendTempDir 是发送层用的（temp/atme），
-  // tempDir 是插件 data 下的历史目录（旧版本用过，留着兜底）
-  for (const dir of [sendTempDir, tempDir]) {
-    const files = await fs.readdir(dir).catch(() => [])
-    for (const file of files) {
-      const filePath = resolve(dir, file)
-      try {
-        const stat = await fs.stat(filePath)
-        if (!stat.isFile()) continue
-        if (stat.mtimeMs < oneHourAgo) {
-          await fs.unlink(filePath)
-          cleaned++
-        }
-      } catch (err) {
-        logger.debug(`[Atme-Plugin] 清理临时文件失败: ${err.message}`)
+  const files = await fs.readdir(tempDir).catch(() => [])
+  for (const file of files) {
+    const filePath = resolve(tempDir, file)
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) continue
+      if (stat.mtimeMs < oneHourAgo) {
+        await fs.unlink(filePath)
+        cleaned++
       }
+    } catch (err) {
+      logger.debug(`[Atme-Plugin] 清理临时文件失败: ${err.message}`)
     }
   }
 

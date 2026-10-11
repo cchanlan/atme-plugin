@@ -282,7 +282,8 @@ async function renderReminderImage (e, records, targetQQ, groupName, memberCount
     selfQQ: targetQQ,
     dataDir,
     bannerHtml,
-    tempPrefix: 'atme_reminder'
+    tempPrefix: 'atme_reminder',
+    e
   })
 }
 

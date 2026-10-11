@@ -88,7 +88,7 @@ const modules = [
 // ---------- 渲染（插件自管管线，2x 超采样 PNG）----------
 const template = require('art-template')
 
-async function renderHelpImage () {
+async function renderHelpImage (e) {
   const now = getNow()
   const html = template(tplPath, {
     title: 'Atme-Plugin',
@@ -105,7 +105,8 @@ async function renderHelpImage () {
     viewportWidth: 760,
     deviceScaleFactor: 2,
     screenshotSelector: '#container',
-    imgType: getImgType()
+    imgType: getImgType(),
+    e
   })
 
   if (!buffs || buffs.length === 0) throw new Error('渲染返回空结果')
@@ -163,17 +164,17 @@ async function isCacheValid () {
  *    走的是"现出图"这条 —— 早先只有命中缓存时才清，结果旧格式的缓存
  *    一直留在目录里没人管（实测切换格式后 png 和 jpeg 两份并存）。
  */
-async function generateIfNeeded () {
+async function generateIfNeeded (e) {
   if (await isCacheValid()) {
     cleanStaleCache()
     return getCacheFile()
   }
-  const file = await renderHelpImage()
+  const file = await renderHelpImage(e)
   await cleanStaleCache()   // 刚生成新格式，顺手把别的格式/版本的清掉
   return file
 }
 
-async function refreshHelp () {
+async function refreshHelp (e) {
   // 清掉所有历史版本的缓存文件
   try {
     const files = await fs.readdir(CACHE_DIR)
@@ -181,7 +182,7 @@ async function refreshHelp () {
       if (isCacheFile(f)) await fs.unlink(path.join(CACHE_DIR, f)).catch(() => {})
     }
   } catch { /* 目录不存在 */ }
-  return await renderHelpImage()
+  return await renderHelpImage(e)
 }
 
 function replyImage (e, imgPath) {
@@ -211,7 +212,7 @@ export class AtmeHelp extends plugin {
     }
     this._generating = true
     try {
-      replyImage(e, await generateIfNeeded())
+      replyImage(e, await generateIfNeeded(e))
     } catch (err) {
       logger.error('[Atme-Plugin] 帮助生成失败:', err)
       e.reply('❌ 生成帮助菜单失败')
@@ -228,7 +229,7 @@ export class AtmeHelp extends plugin {
     }
     this._generating = true
     try {
-      replyImage(e, await refreshHelp())
+      replyImage(e, await refreshHelp(e))
     } catch (err) {
       logger.error('[Atme-Plugin] 刷新帮助失败:', err)
       e.reply('❌ 刷新帮助失败')

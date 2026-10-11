@@ -17,7 +17,7 @@
  */
 
 import fs from 'fs/promises'
-import { statSync } from 'node:fs'
+import { statSync, existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import pup from '../lib/puppeteer_local.js'
 import { resourcesDir, uiIconDir } from './paths.js'
@@ -513,45 +513,123 @@ export async function renderPageBuffers ({
   deviceScaleFactor = 2,
   screenshotSelector = '.phone',
   imgType = 'jpeg',
-  quality = 88
+  quality = 88,
+  e = null
 }) {
   const buffs = []
 
   for (let p = 0; p < pages.length; p++) {
     buffs.push(await renderOnePage(pages[p], {
       tempPrefix, viewportWidth, deviceScaleFactor, screenshotSelector, imgType, quality
-    }))
+    }, e))
   }
 
   return buffs
 }
 
 /**
- * 渲染一页。两级策略：
- *   ① 自己的管线（借宿主的浏览器 / 自启动兜底）—— 能等图、能控视口，效果最好
- *   ② 宿主的**通用渲染服务**（`renderService.render`）—— **后端无关**，
- *      用户配了外置渲染（远程 chromium / browserless / 非 puppeteer 后端）时只有这条走得通
+ * 渲染一页。三级策略，从「最省事、最能兼容各家配置」往下退：
  *
- * ⚠️ ② 是必须的：用户的渲染后端不是 puppeteer 时，宿主的 `browserInit`/`browser`
- *    都不存在，① 一定拿不到浏览器；而自己 launch 在只装了 `puppeteer-core` 的机器上
- *    也必然失败（`puppeteer-core` 从不自带浏览器，报 `Could not find Chrome`）。
- *    实测就是这种现场：macOS + TRSS + 外置渲染，插件直接抛栈。
+ *   ① `e.runtime.render` —— **框架自带的出图入口**，走宿主配好的渲染后端。
+ *      这是 xhh-TL / 王者等插件通用的做法，外置渲染、远程浏览器、换别的渲染后端
+ *      都由宿主自己处理，插件不用操心浏览器从哪来。
+ *   ② 自己的 puppeteer 管线 —— 借宿主浏览器 / 自启动兜底。
+ *      比 ① 灵活（能等图、能控 2x 超采样），所以 ① 不可用时用它。
+ *   ③ 直接调宿主的渲染服务 —— ① 的底层，① 不可用但服务还在时的兜底。
+ *
+ * ⚠️ ③ 存在的意义：实测有用户的机器上宿主浏览器起不来
+ *    （`Could not find chrome-headless-shell`），自己 launch 也因为宿主的
+ *    `puppeteer-core` 从不自带浏览器而失败 —— 那种机器上只有「把活交给宿主」
+ *    这条路，硬去碰浏览器一定崩。
  */
-async function renderOnePage (html, opts) {
+async function renderOnePage (html, opts, e) {
+  try {
+    const viaRuntime = await renderViaRuntime(e, html, opts)
+    if (viaRuntime) return viaRuntime
+  } catch (err) {
+    logger.warn(`[Atme-Plugin] 宿主出图入口不可用（${err.message}），改用插件自带管线`)
+  }
+
   try {
     return await renderWithOwnPipeline(html, opts)
   } catch (err) {
-    logger.warn(`[Atme-Plugin] 本地出图不可用（${err.message}），改用宿主渲染服务`)
+    logger.warn(`[Atme-Plugin] 插件自带管线不可用（${err.message}），改用宿主渲染服务`)
   }
 
   const viaHost = await renderViaHostService(html, opts)
   if (viaHost) return viaHost
 
   throw new Error(
-    '本地出图和宿主渲染服务都用不了。' +
-    '请检查 Yunzai 的渲染配置（锅巴 → 渲染设置），' +
-    '或按需安装浏览器：npx puppeteer browsers install chrome'
+    '出图失败：宿主渲染服务与插件自带管线都不可用。' +
+    '请在机器人上的锅巴面板检查渲染设置，' +
+    '或安装浏览器：npx puppeteer browsers install chrome'
   )
+}
+
+/**
+ * ① 走框架自带的 `e.runtime.render(plugin, tpl, data, cfg)`。
+ *
+ * 这是各插件通用的出图入口（xhh-TL / 王者都这么走），好处是**不用自己碰浏览器**：
+ * 用本地 chromium、外置渲染、远程浏览器都行，插件端代码完全一样。
+ *
+ * 模板用我们自己生成的整页 HTML：写到一个临时文件，再用 `beforeRender`
+ * 把 `tplFile` 覆盖成它的绝对路径（xhh-TL 也这么干，用于把模板放到 resources 之外）。
+ *
+ * 返回 Buffer；`e.runtime.render` 不可用时返回 null（交给下一级）。
+ */
+async function renderViaRuntime (e, html, { tempPrefix, imgType, quality }) {
+  const runtime = e?.runtime
+  if (typeof runtime?.render !== 'function') return null
+
+  const tplDir = resolve(process.cwd(), 'temp', 'atme-tpl')
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const tplFile = resolve(tplDir, `${tempPrefix}_${stamp}.html`)
+  await fs.mkdir(tplDir, { recursive: true })
+  await fs.writeFile(tplFile, html, 'utf-8')
+
+  try {
+    const result = await runtime.render('atme-plugin', `${tempPrefix}/${stamp}`, {}, {
+      retType: 'base64',
+      imgType,
+      quality,
+      beforeRender: ({ data }) => ({ ...data, tplFile, saveId: `atme_${stamp}` })
+    })
+    return extractRenderBuffer(result)
+  } finally {
+    try { await fs.unlink(tplFile) } catch { /* 已经没了 */ }
+  }
+}
+
+/**
+ * 从各家渲染入口的返回值里抠出图片 Buffer。
+ * 返回形态各家不一：Buffer / base64 串 / `data:` URL / `{file}` 对象 / 本地路径。
+ * （与 xhh-TL 的 extractRenderBuffer 同样的思路。）
+ */
+function extractRenderBuffer (result) {
+  if (!result) return null
+  if (Buffer.isBuffer(result)) return result
+  if (Buffer.isBuffer(result.image)) return result.image
+  if (Buffer.isBuffer(result.buffer)) return result.buffer
+
+  const value = result.file ?? result
+  if (Buffer.isBuffer(value)) return value
+  if (typeof value !== 'string') return null
+
+  if (value.startsWith('base64://')) return Buffer.from(value.slice(9), 'base64')
+  if (value.startsWith('data:image')) {
+    const comma = value.indexOf(',')
+    if (comma >= 0) return Buffer.from(value.slice(comma + 1), 'base64')
+  }
+  // 裸 base64：够长且只含 base64 字符集
+  if (value.length > 256 && /^[A-Za-z0-9+/=\r\n]+$/.test(value)) {
+    try { return Buffer.from(value, 'base64') } catch { /* 不是 base64 */ }
+  }
+  // 本地路径
+  const file = value.replace(/^file:\/\//, '')
+  try {
+    if (existsSync(file)) return readFileSync(file)
+  } catch { /* 读不到就算了 */ }
+  return null
 }
 
 /** ① 自己的管线：借宿主浏览器（优先）或自启动，然后按选择器截图 */
@@ -673,7 +751,8 @@ export async function renderMessages ({
   selfQQ = null,
   dataDir,
   bannerHtml = '',
-  tempPrefix = 'atme'
+  tempPrefix = 'atme',
+  e = null
 }) {
   if (!msgList?.length) return []
   const fallbackIconUrl = getIconUrl('images')
@@ -690,7 +769,7 @@ export async function renderMessages ({
     timeStr: formatClock()
   }))
 
-  return renderPageBuffers({ pages, tempPrefix, imgType: getImgType() })
+  return renderPageBuffers({ pages, tempPrefix, imgType: getImgType(), e })
 }
 
 export default {

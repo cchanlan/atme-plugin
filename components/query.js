@@ -165,7 +165,8 @@ export async function queryWhoAtme (e) {
       memberCount,
       selfQQ: targetQQ,
       dataDir,
-      tempPrefix: 'atme'
+      tempPrefix: 'atme',
+      e
     })
 
     await cleanTempFiles()
