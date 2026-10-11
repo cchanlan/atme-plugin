@@ -8,9 +8,9 @@ const __dirname = path.dirname(__filename);
 export default {
     name: "Atme-Plugin",
     title: "Atme-Plugin",
-    author: "Anyliew",
-    authorLink: "https://gitcode.com/anyliew/atme-plugin",
-    link: "https://gitcode.com/anyliew/atme-plugin",
+    author: "cchanlan",
+    authorLink: "https://github.com/cchanlan",
+    link: "https://github.com/cchanlan/atme-plugin",
     isV3: true,
     isV2: false,
     description: "查询群内提及你的消息记录",

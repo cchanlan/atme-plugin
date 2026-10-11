@@ -16,5 +16,13 @@
   ],
   "dependencies": {
     "yaml": "^2.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cchanlan/atme-plugin.git"
+  },
+  "homepage": "https://github.com/cchanlan/atme-plugin",
+  "bugs": {
+    "url": "https://github.com/cchanlan/atme-plugin/issues"
   }
 }
