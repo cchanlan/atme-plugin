@@ -376,11 +376,92 @@ const schemas = [
     bottomHelpMessage: '⚠️ 微信不认 webp，会变成文件发出去。',
     component: 'Select',
     componentProps: {
+      style: { width: '420px' },
       options: [
         { label: 'PNG（默认，最清晰，体积最大）', value: 'png' },
         { label: 'JPEG（体积小，小字略糊）', value: 'jpeg' },
         { label: 'WebP（体积最小，微信下会变成文件）', value: 'webp' }
       ]
+    }
+  },
+  {
+    component: 'Divider',
+    label: '聊天背景'
+  },
+  {
+    field: 'atme.background.image',
+    label: '背景图片',
+    helpMessage: '点一下直接上传，图会自动存进插件的 resources/bg 目录。留空 = 纯色',
+    component: 'Upload',
+    componentProps: {
+      action: '/custom/atme-plugin/upload',
+      accept: 'image/*',
+      maxCount: 1,
+      listType: 'text'
+    }
+  },
+  {
+    field: 'atme.background.imageUrl',
+    label: '或填图片链接',
+    helpMessage: '不想上传时可以直接填图片链接或本机路径；填了这项就优先用它',
+    component: 'Input',
+    componentProps: {
+      placeholder: '留空 = 用上面上传的图',
+      style: { width: '420px' }
+    }
+  },
+  {
+    field: 'atme.background.veil',
+    label: '遮罩浓度',
+    helpMessage: '背景上盖一层白色遮罩的浓度（百分比），越大背景越淡、文字越清楚',
+    component: 'InputNumber',
+    componentProps: {
+      min: 0,
+      max: 100,
+      step: 5,
+      placeholder: '0 ~ 100',
+      addonAfter: '%',
+      style: { width: '130px' }
+    }
+  },
+  {
+    field: 'atme.background.fit',
+    label: '背景铺法',
+    helpMessage: 'cover 铺满整屏（超出部分裁掉）；contain 完整显示整图（可能留白）',
+    component: 'Select',
+    componentProps: {
+      style: { width: '420px' },
+      options: [
+        { label: '铺满整屏（裁切）', value: 'cover' },
+        { label: '完整显示（留白）', value: 'contain' }
+      ]
+    }
+  },
+  {
+    field: 'atme.background.position',
+    label: '背景对齐',
+    helpMessage: '铺满整屏时优先保留哪一端：选「顶部」能保住人物头部不被裁',
+    component: 'Select',
+    componentProps: {
+      style: { width: '420px' },
+      options: [
+        { label: '顶部', value: 'top' },
+        { label: '居中', value: 'center' },
+        { label: '底部', value: 'bottom' }
+      ]
+    }
+  },
+  {
+    field: 'atme.background.screenRatio',
+    label: '屏幕比例',
+    helpMessage: '铺背景时把手机撑成「高 / 宽」这个比例。0 = 不撑（图跟内容走、下方不留白，但背景会被裁）；想铺满壁纸填 1.9（约 9:17）或 2.17（全面屏）',
+    component: 'InputNumber',
+    componentProps: {
+      min: 0,
+      max: 3,
+      step: 0.05,
+      placeholder: '0 = 不撑',
+      style: { width: '130px' }
     }
   },
   {

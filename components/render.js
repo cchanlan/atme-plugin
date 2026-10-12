@@ -22,6 +22,7 @@ import { resolve } from 'node:path'
 import pup from '../lib/puppeteer_local.js'
 import { resourcesDir, uiIconDir } from './paths.js'
 import { getImgType } from './imageType.js'
+import { backgroundStyle, minHeightPx } from './background.js'
 
 const iconDir = resolve(resourcesDir, 'icon')
 
@@ -315,27 +316,38 @@ export function buildPageHtml ({
   totalPages,
   bannerHtml = '',
   extraCss = '',
-  timeStr = null
+  timeStr = null,
+  viewportWidth = 600
 }) {
   const clock = timeStr || formatClock()
   const count = Number(memberCount) > 0 ? `(${memberCount})` : ''
+
+  // 自定义聊天背景：图铺在 .phone 上，聊天区盖一层白色遮罩保证文字清楚。
+  // 铺背景时额外把手机撑成「屏幕比例」—— 否则消息少时容器很宽，
+  // cover 会疯狂放大把人物裁掉（详见 background.js 的说明）。
+  const bgStyle = backgroundStyle()
+  const minH = minHeightPx(viewportWidth)
+  const phoneStyle = bgStyle + (minH ? `min-height:${minH}px;` : '')
 
   const img = (n) => {
     const u = uiIcon(n)
     return u ? `<img class="ui-ic" src="${u}" alt="" />` : ''
   }
   // 状态栏：左边 时间+闹钟+投屏，右边 5G+信号+WiFi+电量（全部来自参考图）
-  const sbLeft = `${img('st-alarm')}${img('st-cast')}`
-  const sbRight = `${img('st-5g')}${img('st-signal')}${img('st-wifi')}${img('st-battery')}`
+  // 状态栏素材整组从参考截图抠的（音乐+时钟 / 灵动岛 / 5G+WiFi+电量）
+  const sbLeft = img('st-icons-left')
+  const sbIsland = img('st-island')
+  const sbRight = img('st-icons-right')
 
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><style>${PAGE_CSS}${extraCss}</style></head>
 <body>
-<div class="phone" id="container">
-  <!-- 状态栏 -->
+<div class="phone${bgStyle ? ' has-bg' : ''}" id="container"${phoneStyle ? ` style="${phoneStyle}"` : ''}>
+  <!-- 状态栏（中间是灵动岛） -->
   <div class="statusbar">
     <span class="sb-left"><span class="sb-time">${escapeHtml(clock)}</span>${sbLeft}</span>
+    <span class="sb-island">${sbIsland}</span>
     <span class="sb-icons">${sbRight}</span>
   </div>
 
@@ -371,17 +383,27 @@ const PAGE_CSS = `
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:#eef1f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC","WenQuanYi Micro Hei","Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
   .phone{width:600px;min-height:200px;background:#f7f8fc;display:flex;flex-direction:column;overflow:hidden;position:relative}
+  /* 自定义背景的白色遮罩：盖住**整个手机**（含页脚、输入栏上方），
+     不然那些没被 .chat 覆盖的缝隙会直接露出原图，一条生硬的色带。
+     内容抬到遮罩之上；导航栏/输入栏本身是不透明的，不受影响。 */
+  .phone.has-bg::before{content:'';position:absolute;inset:0;background:rgba(255,255,255,var(--veil,.72));pointer-events:none;z-index:0}
+  .phone.has-bg>*{position:relative;z-index:1}
 
   /* ---- 状态栏 ---- */
-  .statusbar{display:flex;align-items:center;justify-content:space-between;padding:8px 18px 6px;background:#f7f8fc;color:#2a2f3d;flex:none}
+  .statusbar{display:flex;align-items:center;justify-content:space-between;padding:9px 18px;background:#fff;color:#2a2f3d;flex:none;position:relative;min-height:66px}
+  /* 灵动岛：直接贴参考截图里抠出来的真图（黑胶囊 + 专辑封面 + 声波）。
+     绝对定位居中，不吃左右两侧的空间 */
+  .sb-island{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);flex:none}
+  .sb-island .ui-ic{height:48px;width:auto;display:block}
   .sb-left{display:flex;align-items:center;gap:9px}
   .sb-time{font-size:16px;font-weight:600;letter-spacing:.2px}
   .sb-icons{display:flex;align-items:center;gap:6px}
   .statusbar .ui-ic{width:auto;display:block}
   /* 图标都是 3x 高清图，这里按实际显示尺寸缩下来，保证锐利 */
-  .sb-left .ui-ic{height:17px}
-  .sb-icons .ui-ic{height:16px}
-  .sb-icons .ui-ic:first-child{height:14px}
+  /* 左右两组图标是从参考截图整块抠的（白底保留 —— 白色容器本身就是图标的一部分，
+     抠成透明会把音乐图标的白圆、时钟的白方块一起抹掉），所以状态栏底色统一用纯白 */
+  .sb-left .ui-ic{height:28px}
+  .sb-icons .ui-ic{height:33px}
 
   /* ---- 群名导航栏：浅蓝粉渐变 ---- */
   .nav{background:linear-gradient(135deg,#7cb2ff 0%,#bda6ff 52%,#ffa8d4 100%);color:#fff;padding:11px 14px;display:flex;align-items:center;gap:6px;flex:none}
@@ -410,6 +432,12 @@ const PAGE_CSS = `
   .who-self{justify-content:flex-end}
   .name{font-size:12px;color:#9099ac;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .time{font-size:11px;color:#bcc2d2;flex:none}
+  /* 铺了自定义背景时：名字/时间直接压在花哨底图上会看不清，
+     加深字色 + 加一圈白色描边，比一味加大遮罩有效 */
+  .phone.has-bg .name{color:#5a6172}
+  .phone.has-bg .time{color:#7c8394}
+  .phone.has-bg .who{text-shadow:0 1px 2px rgba(255,255,255,.95),0 0 6px rgba(255,255,255,.85)}
+  .phone.has-bg .pager{color:#7c8394}
 
   /* ---- 标签 ---- */
   .tag{display:inline-flex;align-items:center;border-radius:5px;padding:1.5px 6px;font-size:10px;font-weight:700;color:#fff;flex:none;letter-spacing:.2px}

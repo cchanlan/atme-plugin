@@ -59,6 +59,12 @@ cd plugins/atme-plugin && pnpm add better-sqlite3
 | `reminderContext.*` | `true / 1 / 1` | 提醒截图上下文的**新群默认模板**（群内设置过即以群内为准） |
 | `autoMergeCfg` | `true` | 插件更新时自动把新增配置项合并进用户配置 |
 | `imgType` | `png` | 出图格式：`png`（最清晰）/ `jpeg`（体积小）/ `webp`（最小但微信会变文件）|
+| `background.image` | 空 | 聊天区背景图（锅巴面板上传，自动存进插件 `resources/bg/`），留空 = 纯色 |
+| `background.imageUrl` | 空 | 或直接填图片链接/本机路径，填了就优先用它 |
+| `background.veil` | `72` | 背景遮罩浓度（**百分比** 0~100），越大背景越淡、文字越清楚 |
+| `background.fit` | `cover` | `cover` 铺满裁切 / `contain` 完整显示（留白）|
+| `background.position` | `center` | 铺满时保留哪一端：`top` / `center` / `bottom` |
+| `background.screenRatio` | `0` | 铺背景时把手机撑成的高宽比；`0` = 不撑（图跟内容走、下方不留白），想壁纸铺满填 `1.9` |
 | `browser.idleCloseSeconds` | `60` | 仅插件自开浏览器时生效的空闲关闭秒数 |
 
 > 提醒**默认开启**，无需任何设置。群友发 `#关闭我的艾特提醒` 可单独关闭自己；
