@@ -217,6 +217,11 @@ async function renderReminderImage (e, records, targetQQ, groupName, memberCount
   const ctxCfg = await getContextConfig(e.group_id)
   const gm = await getMemberMap(e)
 
+  // 被提醒者的昵称：每条艾特 @ 的都是同一个人（targetQQ），@ 前缀共用一个名字。
+  // 取法与查询图一致——群名片优先，拿不到 memberName 会回落 QQ 号。
+  const targetInfo = findMember(gm, targetQQ) || {}
+  const targetName = memberName(targetInfo, targetQQ, '')
+
   const msgListRaw = []
 
   const contextMap = (ctx, isBefore, index) => {
@@ -251,7 +256,9 @@ async function renderReminderImage (e, records, targetQQ, groupName, memberCount
       avatar: Render.avatarUrl(senderId),
       time: rec.time,
       isAt: true,
-      atTarget: null,          // 提醒图里 @ 的就是本人，不用再补 @ 前缀
+      // 提醒图也要补 @ 前缀：与查询图一致，显示「@被艾特的那个人」。
+      // 提醒图里所有主消息 @ 的都是同一个人，共用一个名字。
+      atTarget: targetName,
       sortTime: rec.time,
       quotedMsg: rec.quoted_msg
     }
@@ -274,7 +281,7 @@ async function renderReminderImage (e, records, targetQQ, groupName, memberCount
 
   const bannerHtml = `<div class="banner"><span class="dot"></span>你不在的时候，有人艾特过你</div>`
 
-  // selfQQ = 被提醒的人：他自己的发言靠右显示蓝粉气泡
+  // selfQQ = 被提醒的人：他自己的发言靠右显示（气泡配色与别人一致）
   return Render.renderMessages({
     msgList,
     groupName,

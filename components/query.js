@@ -158,7 +158,7 @@ export async function queryWhoAtme (e) {
     if (msgList.length === 0) return e.reply('没有找到有效的艾特记录')
 
     // ---- 出图 ----
-    // selfQQ：被查询的人的消息靠右显示（蓝粉渐变气泡），一眼看出哪些话是"他"说的
+    // selfQQ：被查询的人的消息靠右显示（气泡配色与别人一致），一眼看出哪些话是"他"说的
     const buffs = await Render.renderMessages({
       msgList,
       groupName,

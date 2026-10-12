@@ -10,7 +10,7 @@
  *
  * 版式照手机 QQ 群聊界面来：
  *   顶部是状态栏（时间 / 信号 / 电量），下面是群名导航栏，
- *   别人的消息靠左（浅色气泡），**被查询/被提醒的那个人自己发的消息靠右**（蓝粉渐变气泡），
+ *   别人的消息靠左（浅色气泡），**被查询/被提醒的那个人自己发的消息靠右**（同色白气泡，只换方向），
  *   底部是输入栏，最下面再加一条手机的系统手势条。
  *
  * 主题色：**浅蓝 → 浅紫 → 浅粉**，整体比初版淡一档。
@@ -232,8 +232,12 @@ export function messageHtml (m, { dataDir, fallbackIconUrl, selfQQ = null, showN
   const quoted = quotedHtml(m.quotedMsg, dataDir, fallbackIconUrl)
   const safeText = escapeHtml(cleanMessageSegments(m.message)).replace(/\n/g, '<br>')
 
-  // @ 目标的高亮前缀：被艾特的那条消息开头补一个 @某某
-  const atPrefix = m.isAt && m.atTarget
+  // @ 目标的高亮前缀：被艾特的那条消息开头补一个 @某某。
+  // 正文已经以 @ 开头的（icqq 等框架的 raw_message 里 at 段就是可见文本）不再补，
+  // 避免 @ 出现两遍；CQ 码形态的框架（JiuLi / OneBot 系）录制时 [CQ:at] 已被剥掉，
+  // 正文里没有 @，需要补。
+  const textStartsWithAt = /^\s*@/.test(m.message || '')
+  const atPrefix = m.isAt && m.atTarget && !textStartsWithAt
     ? `<span class="at-text">@${escapeHtml(m.atTarget)}</span> `
     : ''
 
@@ -405,18 +409,19 @@ const PAGE_CSS = `
   .sb-left .ui-ic{height:28px}
   .sb-icons .ui-ic{height:33px}
 
-  /* ---- 群名导航栏：浅蓝粉渐变 ---- */
-  .nav{background:linear-gradient(135deg,#7cb2ff 0%,#bda6ff 52%,#ffa8d4 100%);color:#fff;padding:11px 14px;display:flex;align-items:center;gap:6px;flex:none}
+  /* ---- 群名导航栏：白底黑字（主人 2026-10-12：渐变太花哨），与状态栏连成一体 ---- */
+  .nav{background:#fff;color:#252a36;padding:11px 14px;display:flex;align-items:center;gap:6px;flex:none;
+    border-bottom:1px solid rgba(120,135,170,.10)}
   .nav-title{font-size:18px;font-weight:600;letter-spacing:.2px;flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .nav-side{width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;opacity:.95}
+  .nav-side{width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;opacity:.85}
   .nav-side svg{width:19px;height:19px}
   .nav-right{width:56px;gap:2px;display:flex}
   .nav-right svg{width:17px;height:17px}
 
-  /* ---- 提醒横幅 ---- */
-  .banner{margin:13px 16px 0;padding:10px 14px;border-radius:11px;font-size:13.5px;font-weight:600;color:#5a5080;
-    background:linear-gradient(135deg,rgba(124,178,255,.14),rgba(189,166,255,.14) 52%,rgba(255,168,212,.16));
-    border:1px solid rgba(189,166,255,.26);display:flex;align-items:center;gap:8px;flex:none}
+  /* ---- 提醒横幅：居中小胶囊（主人 2026-10-12：整条拉通太笨重），风格与气泡一致 ---- */
+  .banner{margin:13px auto 0;padding:8px 16px;border-radius:999px;font-size:13.5px;font-weight:600;color:#252a36;
+    background:#fff;border:1px solid rgba(120,135,170,.14);box-shadow:0 1px 2px rgba(30,35,55,.05);
+    display:flex;align-items:center;gap:7px;width:fit-content;max-width:calc(100% - 32px)}
   .banner .dot{width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,#7cb2ff,#ffa8d4);flex:none}
 
   .chat{padding:16px 16px 6px;flex:1}
@@ -452,25 +457,22 @@ const PAGE_CSS = `
   .bubble{display:inline-block;padding:10px 14px;border-radius:16px;font-size:16px;line-height:1.45;color:#252a36;
     background:#fff;box-shadow:0 1px 2px rgba(30,35,55,.05);word-wrap:break-word;overflow-wrap:anywhere;max-width:100%}
   .msg.other .bubble{border-top-left-radius:5px}
-  .msg.self .bubble{background:linear-gradient(135deg,#7cb2ff 0%,#bda6ff 52%,#ffa8d4 100%);color:#fff;border-top-right-radius:5px;
-    box-shadow:0 2px 8px rgba(150,155,220,.22)}
+  /* 自己的消息：只靠右 + 右上尖角，气泡配色与别人一致（主人 2026-10-12：渐变太花哨） */
+  .msg.self .bubble{border-top-right-radius:5px}
   .msg.is-at .bubble{box-shadow:0 2px 10px rgba(124,178,255,.18)}
-  .msg.self.is-at .bubble{box-shadow:0 2px 12px rgba(150,155,220,.28)}
-  /* 全体艾特：左侧气泡也带一层主题色描边，跟普通上下文区分开 */
+  /* 全体艾特：左侧气泡也带一层主题色描边，跟普通上下文区分开。
+     自己的全体艾特消息现在也是白气泡，保留描边即可 */
   .msg.is-all .bubble{border:1.5px solid rgba(189,166,255,.42);background:linear-gradient(135deg,rgba(124,178,255,.06),rgba(255,168,212,.08))}
-  .msg.self.is-all .bubble{border:none}
+  .msg.self.is-all .bubble{border:1.5px solid rgba(189,166,255,.42);background:#fff}
   .msg.ctx .bubble{font-size:15px}
   .bubble-text{word-wrap:break-word;overflow-wrap:anywhere}
   .at-text{color:#5b93ff;font-weight:600}
-  .msg.self .at-text{color:#fff}
 
   /* ---- 引用块 ---- */
   .quoted{margin-bottom:8px;padding:7px 10px;border-radius:9px;font-size:13px;line-height:1.35;
     background:rgba(130,140,165,.09);border-left:3px solid rgba(130,140,165,.34);color:#767e94}
   .quoted-who{display:block;font-weight:700;margin-bottom:2px;color:#666e86}
   .quoted-text{word-break:break-word}
-  .msg.self .quoted{background:rgba(255,255,255,.24);border-left-color:rgba(255,255,255,.7);color:rgba(255,255,255,.94)}
-  .msg.self .quoted-who{color:#fff}
 
   /* ---- 图片 ---- */
   .msg-img{max-width:100%;border-radius:10px;margin-top:8px;display:block}
@@ -492,6 +494,25 @@ const PAGE_CSS = `
 `
 
 // ---------- puppeteer 出图 ----------
+
+/**
+ * 给整页 HTML 注入 CSS zoom。
+ *
+ * 为什么需要：宿主的渲染器截图前**不设置视口缩放**（puppeteer 默认 1 倍采样），
+ * 600px 设计宽出图就是 600 物理像素，手机 QQ 里一放大，昵称/标签这些小字全糊。
+ * zoom:2 让浏览器按 2 倍重新排版和光栅化（文本是矢量放大，真高清，不是拉伸），
+ * 出图 1200px。
+ *
+ * 统一在入口注入而不是各路径自己处理：三条渲染路径（宿主 runtime / 自带管线 /
+ * 宿主渲染服务）拿到同一份 HTML，输出尺寸一致；自带管线的 deviceScaleFactor
+ * 相应保持 1，避免 2×2 叠成 4 倍。
+ */
+function injectZoom (html, zoom = 2) {
+  if (!zoom || Number(zoom) === 1) return html
+  const style = `<style>html{zoom:${Number(zoom) || 2}}</style>`
+  if (html.includes('</head>')) return html.replace('</head>', `${style}</head>`)
+  return style + html
+}
 
 /**
  * 等页面里的图片全部落定，并把加载失败的记一条日志。
@@ -542,13 +563,19 @@ export async function renderPageBuffers ({
   screenshotSelector = '.phone',
   imgType = 'jpeg',
   quality = 88,
-  e = null
+  e = null,
+  zoom = 2
 }) {
   const buffs = []
 
+  // 总放大倍率 = CSS zoom × 自带管线的 deviceScaleFactor，恒定 2 倍：
+  // zoom 已占掉一份，deviceScaleFactor 按比例回落，避免叠成 4 倍超大图
+  const z = Number(zoom) || 1
+  const dsf = z > 1 ? Math.max(1, 2 / z) : deviceScaleFactor
+
   for (let p = 0; p < pages.length; p++) {
-    buffs.push(await renderOnePage(pages[p], {
-      tempPrefix, viewportWidth, deviceScaleFactor, screenshotSelector, imgType, quality
+    buffs.push(await renderOnePage(injectZoom(pages[p], zoom), {
+      tempPrefix, viewportWidth, deviceScaleFactor: dsf, screenshotSelector, imgType, quality
     }, e))
   }
 
