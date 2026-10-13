@@ -429,29 +429,32 @@ const PAGE_CSS = `
   /* ---- 消息行 ---- */
   .msg{display:flex;gap:10px;align-items:flex-start;margin-top:11px}
   .msg.self{flex-direction:row;justify-content:flex-end}
-  .msg .col{max-width:76%;display:flex;flex-direction:column}
+  /* 列宽由最宽的子元素（通常是名字行）决定；气泡/图片用 flex-start 收拢成
+     自身内容的宽度，不再跟着名字行一起拉通（主人 2026-10-13：名字长→气泡图片全变宽） */
+  .msg .col{max-width:76%;display:flex;flex-direction:column;align-items:flex-start}
   .msg.self .col{align-items:flex-end}
   .avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;background:#e3e8f2}
   .avatar.dim{opacity:.72}
   .who{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px;color:#9099ac;max-width:100%}
   .who-self{justify-content:flex-end}
-  .name{font-size:12px;color:#9099ac;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .time{font-size:11px;color:#bcc2d2;flex:none}
-  /* 铺了自定义背景时：名字/时间直接压在花哨底图上会看不清，
-     加深字色 + 加一圈白色描边，比一味加大遮罩有效 */
-  .phone.has-bg .name{color:#5a6172}
-  .phone.has-bg .time{color:#7c8394}
-  .phone.has-bg .who{text-shadow:0 1px 2px rgba(255,255,255,.95),0 0 6px rgba(255,255,255,.85)}
+  /* 名字全黑、时间浅灰（主人 2026-10-13：从 QQ 截图取色后仍嫌灰，直接用黑） */
+  .name{font-size:12px;color:#1c1e24;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .time{font-size:11px;color:#84899a;flex:none}
+  /* 铺了自定义背景时：不再用白色光晕描边（主人 2026-10-13：边缘发光很难看），
+     只把时间戳加深一档保证可读，名字全黑本来就压得住 */
+  .phone.has-bg .name{color:#1c1e24}
+  .phone.has-bg .time{color:#62677a}
   .phone.has-bg .pager{color:#7c8394}
 
   /* ---- 标签 ---- */
-  .tag{display:inline-flex;align-items:center;border-radius:5px;padding:1.5px 6px;font-size:10px;font-weight:700;color:#fff;flex:none;letter-spacing:.2px}
-  .tag-owner{background:linear-gradient(135deg,#f9b45f,#f79463)}
-  .tag-admin{background:linear-gradient(135deg,#6ad9bb,#5fbfe0)}
-  .tag-title{background:linear-gradient(135deg,#bda6ff,#ffa8d4)}
-  .tag-member{background:#cbd1de}
-  .tag-all{background:linear-gradient(135deg,#7cb2ff,#ffa8d4)}
-  .ctx-tag{display:inline-flex;border-radius:5px;padding:1.5px 6px;font-size:10px;font-weight:700;color:#fff;background:#c2c8d6;flex:none}
+  /* ---- 标签：浅底深字（主人 2026-10-13：白字压浅底对比度差、看着糊） ---- */
+  .tag{display:inline-flex;align-items:center;border-radius:5px;padding:1.5px 6px;font-size:10px;font-weight:700;flex:none;letter-spacing:.2px}
+  .tag-owner{background:#ffe9d6;color:#b05e12}
+  .tag-admin{background:#d8f3ec;color:#0f9b82}
+  .tag-title{background:#ece5ff;color:#7a5bd6}
+  .tag-member{background:#e9edf4;color:#78829b}
+  .tag-all{background:#e3ecff;color:#4a7de0}
+  .ctx-tag{display:inline-flex;border-radius:5px;padding:1.5px 6px;font-size:10px;font-weight:700;color:#69718a;background:#e8ecf3;flex:none}
 
   /* ---- 气泡 ---- */
   .bubble{display:inline-block;padding:10px 14px;border-radius:16px;font-size:16px;line-height:1.45;color:#252a36;
@@ -765,17 +768,44 @@ async function renderViaHostService (html, { tempPrefix, imgType, quality }) {
     await fs.mkdir(tplDir, { recursive: true })
     await fs.writeFile(tplFile, html, 'utf-8')
 
-    // 用 render 而不是 screenshot：render 直接把后端的原始产物（Buffer）返回，
-    // 不会包成 segment。
-    const res = await svc.render('atme-plugin', {
-      tplFile,
-      saveId: `atme_${stamp}`,
-      imgType,
-      quality
-    })
+    // JiuLi 的渲染服务叫 render（直接返回 Buffer）；TRSS 系（含 AozakiArina-Bot/Yunzai）
+    // 只有 screenshot（base64/segment 包裹或 Buffer 数组）。两条路都接，extractRenderBuffer 兜底。
+    let res
+    if (typeof svc.render === 'function') {
+      res = await svc.render('atme-plugin', {
+        tplFile,
+        saveId: `atme_${stamp}`,
+        imgType,
+        quality
+      })
+    } else if (typeof svc.screenshot === 'function') {
+      const shot = await svc.screenshot(`atme-plugin/${tempPrefix}_${stamp}`, {
+        tplFile,
+        saveId: `atme_${stamp}`,
+        imgType,
+        quality,
+        // 截图目标：渲染器找 #container，我们的手机容器就挂了这个 id
+        // multiPage 关掉——一页一图由插件自己切好
+        multiPage: false
+      })
+      // screenshot 可能返回 base64 串 / segment 对象 / Buffer 数组（multiPage）
+      res = Array.isArray(shot) ? shot[0] : shot
+    } else {
+      return null
+    }
     if (Buffer.isBuffer(res)) return res
     if (Buffer.isBuffer(res?.file)) return res.file
     if (Buffer.isBuffer(res?.data)) return res.data
+    if (typeof res === 'string') {
+      // base64:// 前缀（TRSS segment）或裸 base64 / data: URL
+      const buf = extractRenderBuffer(res)
+      if (buf) return buf
+    }
+    if (res?.image) {
+      // segment.image 包裹形态：{type:'image', file:'base64://...'} 或带 buffer
+      const buf = extractRenderBuffer(res.image ?? res)
+      if (buf) return buf
+    }
     logger.warn('[Atme-Plugin] 宿主渲染服务返回了非图片结果')
     return null
   } catch (err) {
