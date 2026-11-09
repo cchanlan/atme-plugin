@@ -42,6 +42,7 @@ async function readGroupOverrides (yamlCfg) {
 // 三大分区：基础设置 / 提醒配置 / 其他配置（出图浏览器也归入其他配置）。
 // 注：群提醒开关 / 个人提醒开关 / 上下文开关由命令维护、存于 SQLite，
 // 不在 yaml 里；yaml 里的 reminderContext.* 只是"群里还没设置过"时的新群默认模板。
+// 群提醒的默认值来自 yaml 的 reminder.whitelistGroups（白名单为空 = 全群默认关）。
 const schemas = [
   // ========== 基础设置 ==========
   {
@@ -160,6 +161,17 @@ const schemas = [
   },
   {
     component: 'Divider',
+    label: '提醒白名单群组'
+  },
+  {
+    field: 'atme.reminder.whitelistGroups',
+    label: '提醒白名单群组',
+    helpMessage: '只有列表内的群在「没单独设置过」时默认开启艾特提醒',
+    component: 'GSelectGroup',
+    bottomHelpMessage: '留空 = 所有群默认关闭（新装插件默认就是关）。白名单只是默认值，群内用命令或下方「群组开关」明确设置过的，以设置为准'
+  },
+  {
+    component: 'Divider',
     label: '群组开关（按群覆盖）'
   },
   {
@@ -185,7 +197,7 @@ const schemas = [
           component: 'Select',
           defaultValue: 'default',
           componentProps: { options: TRI_STATE },
-          bottomHelpMessage: '与「#开启/关闭本群艾特提醒」同源；未单独设置时为开启'
+          bottomHelpMessage: '与「#开启/关闭本群艾特提醒」同源；未单独设置时跟随上方「提醒白名单群组」'
         },
         {
           field: 'contextEnabled',
@@ -221,7 +233,7 @@ const schemas = [
         }
       ]
     },
-    bottomHelpMessage: '按群覆盖运行时开关。三态：跟随默认 = 未单独设置；删除某一行不会重置该群配置，改回「跟随默认」才会重置'
+    bottomHelpMessage: '按群覆盖运行时开关。三态：跟随默认 = 未单独设置（本群艾特提醒跟随白名单，其余跟随各自默认模板）；删除某一行不会重置该群配置，改回「跟随默认」才会重置'
   },
   {
     component: 'Divider',

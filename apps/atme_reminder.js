@@ -2,11 +2,13 @@
 //
 // 行为：有人 @ 你 → 记一条未读；你下次在群里发言时，把这段时间的艾特记录出图 @ 你。
 //
-// ⚠️ 与旧版的差别（主人 2026-10-11 明确）：
-//   **群与个人提醒默认都是开启的**，不用任何人去设置。
+// ⚠️ 群提醒默认值（主人 2026-11-09 明确）：
+//   **白名单模式**：config/config/atme.yaml 的 reminder.whitelistGroups 为空时，
+//   所有群默认**关闭**艾特提醒（新装插件就是这个状态）；白名单内的群未单独设置时默认开启。
+//   群内 #开启/关闭本群艾特提醒、锅巴「群组开关」里的明确设置，始终优先于白名单。
+//   个人开关默认开启：群提醒开着的群里，群友不用设置就能收到提醒。
 //   收到**第一次**提醒时附带一句「不想接收就发 #关闭我的艾特提醒」，
 //   之后再提醒就不带这句了，不啰嗦。
-//   （旧版是双层默认关闭，需要主人开群开关 + 每个人开个人开关，等于默认没人用。）
 
 import plugin from '../../../lib/plugins/plugin.js'
 import * as Render from '../components/render.js'
@@ -106,11 +108,32 @@ function scheduleRecall (e, messageIds, delaySec) {
   timer.unref?.()
 }
 
-// ==================== 存储读写（默认开启：没设置过就是开） ====================
+// ==================== 存储读写（群默认看白名单，个人默认开） ====================
+
+/** 提醒白名单群号（yaml: reminder.whitelistGroups）；空数组 = 所有群默认关闭 */
+function getRemindWhitelist () {
+  const list = getConfig()?.reminder?.whitelistGroups
+  if (!Array.isArray(list)) return []
+  return list.map(v => String(v)).filter(Boolean)
+}
+
+function inRemindWhitelist (groupId) {
+  return getRemindWhitelist().includes(String(groupId))
+}
+
+/**
+ * 本群提醒状态：库里有明确设置就以库为准（命令 / 锅巴三态覆盖），
+ * 否则跟随白名单 —— 不在白名单就是关，白名单为空则全群默认关。
+ * @returns {Promise<{enabled: boolean, explicit: boolean}>}
+ */
+async function getGroupRemindState (groupId) {
+  const v = await Store.getGroupRemindEnabled(groupId)
+  if (v !== null) return { enabled: v, explicit: true }
+  return { enabled: inRemindWhitelist(groupId), explicit: false }
+}
 
 async function getGroupRemindEnabled (groupId) {
-  const v = await Store.getGroupRemindEnabled(groupId)
-  return v === null ? true : v      // ← 默认开启
+  return (await getGroupRemindState(groupId)).enabled
 }
 
 async function setGroupRemindEnabled (groupId, enabled) {
@@ -300,7 +323,7 @@ export class atmeReminder extends plugin {
   constructor () {
     super({
       name: 'Atme-Plugin 艾特被动提醒',
-      dsc: '用户被艾特后，下次发言时主动提醒（默认开启）',
+      dsc: '用户被艾特后，下次发言时主动提醒（按白名单群开启）',
       event: 'message',
       priority: -114513,
       rule: [
@@ -455,12 +478,16 @@ export class atmeReminder extends plugin {
 
   async groupRemindStatus (e) {
     if (!e.isGroup) return e.reply('只支持群聊使用', true)
-    const enabled = await getGroupRemindEnabled(e.group_id)
+    const { enabled, explicit } = await getGroupRemindState(e.group_id)
     const ctx = await getContextConfig(e.group_id)
+    const source = explicit
+      ? '（已单独设置）'
+      : enabled ? '（白名单内，默认开启）' : '（不在白名单，默认关闭）'
 
     e.reply(
-      `本群艾特提醒：${enabled ? '✅ 已开启（默认）' : '❌ 已关闭'}\n` +
+      `本群艾特提醒：${enabled ? '✅ 已开启' : '❌ 已关闭'}${source}\n` +
       `提醒上下文：${ctx.enabled ? `✅ 已开启（前 ${ctx.beforeCount} 条 / 后 ${ctx.afterCount} 条）` : '❌ 已关闭'}\n\n` +
+      `白名单在锅巴「提醒配置 → 提醒白名单群组」里配置，留空 = 全部群默认关闭。\n\n` +
       `群命令（仅主人）：\n` +
       `#开启本群艾特提醒\n` +
       `#关闭本群艾特提醒\n` +

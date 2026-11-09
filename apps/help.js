@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url)
 
 // 帮助图模板版本号：仅当模板结构/渲染方式本身变化时才需要递增。
 // 日常改 modules 文案不用动它 —— 缓存文件名带内容哈希，内容一变自动失效重建。
-// v7：换成蓝粉渐变浅色卡片风（与出图界面统一）+ 默认开启语义
+// v7：换成蓝粉渐变浅色卡片风（与出图界面统一）+ 白名单语义
 const HELP_VERSION = 'v7'
 
 const tplPath = path.join(resourcesDir, 'html', 'atme_help.html')
@@ -43,7 +43,7 @@ const modules = [
   },
   {
     name: '艾特提醒',
-    desc: '默认开启 · 被艾特的群友下次发言时会收到提醒',
+    desc: '白名单群开启 · 被艾特的群友下次发言时会收到提醒',
     commands: [
       { cmd: '#关闭我的艾特提醒', desc: '不想接收提醒就发这一条（只对你自己生效）' },
       { cmd: '#我的艾特提醒状态 / #开启我的艾特提醒', desc: '查看状态 · 重新开启' },

@@ -88,7 +88,7 @@ export class whoAtme extends plugin {
       logger.warn(`[Atme-Plugin] 重建存储连接失败: ${err.message}`)
     }
 
-    e.reply('✅ 艾特数据已重置，所有记录与开关配置已还原为默认（提醒默认开启）')
+    e.reply('✅ 艾特数据已重置，所有记录与开关配置已还原为默认（群提醒按白名单默认关闭）')
   }
 
   async onContext (e) {
